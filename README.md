@@ -18,35 +18,6 @@ This project is intentionally not a generic chatbot wrapper. It is a transparent
 
 > **Accuracy note:** this README distinguishes fully implemented local/in-memory behavior from partially wired persistent infrastructure. Postgres/Qdrant storage foundations exist, but the persistent vector retrieval path should be treated as experimental until the dependency/configuration gaps listed in [Known Limitations](#known-limitations) are resolved.
 
----
-
-## 🎬 Hero GIFs
-
-> The repository currently uses placeholder paths for demo media. Add the GIF files under `assets/` when recording demos.
-
-### End-to-end Streamlit demo
-
-![Agentic RAG Demo](assets/demo.gif)
-
-**Suggested content:** upload or select legal documents, submit a legal question, inspect the final grounded answer, expand citations, and download the debug payload.
-
-### Retrieval + answerability flow
-
-![RAG Flow](assets/rag-flow.gif)
-
-**Suggested content:** query understanding → optional rewrite/decomposition → hybrid retrieval → reranking → parent expansion → answerability gate → grounded answer or insufficient-context fallback.
-
-### Architecture walkthrough
-
-![Architecture](assets/architecture.gif)
-
-**Suggested content:** show how source documents become parent/child chunks, how child hits map back to parent context, and how final answers preserve citation traceability.
-
-### Persistent ingestion lifecycle
-
-![Persistent Ingestion](assets/persistent-ingestion.gif)
-
-**Suggested content:** upload a document through the persistent ingestion UI, register document/version metadata, persist chunks, inspect ingestion job status, and explain how persistent retrieval is intended to resolve vector hits back to Postgres chunk records.
 
 ---
 
