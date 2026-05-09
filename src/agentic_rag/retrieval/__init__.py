@@ -25,6 +25,17 @@ from .parent_child import (
     hybrid_search,
 )
 from .sparse import SparseSearchResult, SparseSearchService, search_child_chunks_sparse
+from .qdrant_postgres_resolver import (
+    PostgresResolvedQdrantChildRepository,
+    QdrantResultResolver,
+    QdrantSearchBackend,
+)
+
+try:
+    from .postgres_chunk_repository import PersistedChunk, PostgresChunkRepository
+except Exception:  # pragma: no cover - optional SQLAlchemy dependency in some test envs
+    PersistedChunk = None  # type: ignore[assignment]
+    PostgresChunkRepository = None  # type: ignore[assignment]
 
 __all__ = [
     "QueryRewriter",
@@ -54,4 +65,10 @@ __all__ = [
     "SparseSearchResult",
     "SparseSearchService",
     "search_child_chunks_sparse",
+    "QdrantSearchBackend",
+    "QdrantResultResolver",
+    "PostgresResolvedQdrantChildRepository",
 ]
+
+if PersistedChunk is not None and PostgresChunkRepository is not None:
+    __all__.extend(["PersistedChunk", "PostgresChunkRepository"])

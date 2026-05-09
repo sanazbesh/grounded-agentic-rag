@@ -63,6 +63,8 @@ def initialize_session_state() -> None:
         "conversation_history": [],
         "selected_document_ids": [],
         "selected_documents": [],
+        "selected_persisted_document_ids": [],
+        "selected_persisted_document_version_ids": [],
         "uploaded_documents": [],
         "use_mock_backend": True,
         "show_debug": True,
@@ -81,18 +83,86 @@ def initialize_session_state() -> None:
         "local_llm_stage_rewrite": True,
         "local_llm_stage_decomposition": True,
         "local_llm_stage_synthesis": True,
+        "latest_ingestion_result": None,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
 
+
+
+def _safe_session_list(value: Any) -> list[Any]:
+    """Normalize session-state list-like values and guard against type objects."""
+
+    if isinstance(value, type):
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
 def _render_upload_controls() -> None:
     """Render local upload controls and update uploaded-document session registry."""
 
+    st.sidebar.subheader("Persistent ingestion")
+    build_runtime, ingest_uploaded, ingestion_dependency_error = _load_persistent_ingestion_dependencies()
+    persistent_upload = st.sidebar.file_uploader(
+        "Upload for persistent ingestion (.pdf, .md, .txt)",
+        type=_file_uploader_types(),
+        accept_multiple_files=False,
+        key="persistent_ingestion_upload",
+        help="This stores files in the persistent document store via IngestionOrchestrator.",
+    )
+    if ingestion_dependency_error:
+        st.sidebar.info(ingestion_dependency_error)
+    if st.sidebar.button(
+        "Ingest uploaded document",
+        use_container_width=True,
+        disabled=persistent_upload is None or ingestion_dependency_error is not None,
+    ):
+        try:
+            runtime = build_runtime()
+            ingestion_result = ingest_uploaded(persistent_upload, runtime=runtime)
+            st.session_state.latest_ingestion_result = ingestion_result
+            if ingestion_result.error_message:
+                st.sidebar.error(f"Ingestion failed: {ingestion_result.error_message}")
+            elif ingestion_result.duplicate_document:
+                st.sidebar.warning("Duplicate document detected. Existing document version was reused.")
+            else:
+                st.sidebar.success("Document ingested successfully.")
+            st.rerun()
+        except Exception as exc:  # pragma: no cover - defensive UI error handling
+            if type(exc).__name__ == "PersistentIngestionSetupError":
+                st.sidebar.info(str(exc))
+                return
+            import traceback
+
+            st.sidebar.error("Persistent ingestion failed")
+            st.sidebar.code(traceback.format_exc())
+
+    latest_ingestion_result = st.session_state.get("latest_ingestion_result")
+    if latest_ingestion_result is not None:
+        st.sidebar.markdown("**Latest ingestion result**")
+        st.sidebar.json(
+            {
+                "document_id": latest_ingestion_result.document_id,
+                "document_version_id": latest_ingestion_result.document_version_id,
+                "ingestion_job_id": latest_ingestion_result.ingestion_job_id,
+                "status": latest_ingestion_result.status,
+                "error_message": latest_ingestion_result.error_message,
+                "status_from_database": latest_ingestion_result.status_from_database,
+            },
+            expanded=False,
+        )
+
+    st.sidebar.divider()
     st.sidebar.subheader("Upload legal documents")
     uploaded_files = st.sidebar.file_uploader(
         "Upload .pdf, .md, or .txt files",
-        type=sorted(ALLOWED_EXTENSIONS),
+        type=_file_uploader_types(),
         accept_multiple_files=True,
         help="Files are stored locally in data/uploads for this test UI.",
     )
@@ -148,6 +218,50 @@ def _render_upload_controls() -> None:
         ]
         st.sidebar.success("Cleared uploaded document list.")
         st.rerun()
+
+
+def _load_persistent_ingestion_dependencies() -> tuple[Any | None, Any | None, str | None]:
+    """Load persistent ingestion dependencies lazily for optional SQLAlchemy environments."""
+
+    try:
+        from ui.persistent_ingestion import build_ingestion_runtime_from_env, ingest_uploaded_document
+    except ModuleNotFoundError as exc:
+        dependency_name = exc.name or "optional dependency"
+        return None, None, (
+            "Persistent ingestion is unavailable in this environment. "
+            f"Missing dependency: {dependency_name}."
+        )
+    except Exception as exc:  # pragma: no cover - defensive import guardrail
+        return None, None, f"Persistent ingestion is unavailable: {type(exc).__name__}: {exc}"
+
+    return build_ingestion_runtime_from_env, ingest_uploaded_document, None
+
+
+def _load_persisted_document_dependencies() -> tuple[Any | None, Any | None, Any | None, str | None]:
+    """Load persisted document listing dependencies lazily for optional SQLAlchemy environments."""
+
+    try:
+        from ui.persisted_documents import (
+            PersistedDocumentServiceError,
+            list_persisted_documents,
+            ready_persisted_documents,
+            to_document_descriptor,
+        )
+    except ModuleNotFoundError as exc:
+        dependency_name = exc.name or "optional dependency"
+        return None, None, None, (
+            "Persisted document selection is unavailable in this environment. "
+            f"Missing dependency: {dependency_name}."
+        )
+    except Exception as exc:  # pragma: no cover - defensive import guardrail
+        return None, None, None, f"Persisted document selection is unavailable: {type(exc).__name__}: {exc}"
+
+    return (
+        list_persisted_documents,
+        ready_persisted_documents,
+        to_document_descriptor,
+        None,
+    )
 
 
 def render_sidebar(
@@ -286,17 +400,66 @@ def render_sidebar(
 
     _render_upload_controls()
 
+    persisted_document_descriptors: list[dict[str, Any]] = []
+    list_persisted_documents, ready_persisted_documents, to_document_descriptor, persisted_dependency_error = (
+        _load_persisted_document_dependencies()
+    )
+    if persisted_dependency_error:
+        st.sidebar.info(persisted_dependency_error)
+    else:
+        try:
+            persisted_documents = list_persisted_documents()
+            if not persisted_documents:
+                st.sidebar.caption("No persisted documents found.")
+            else:
+                ready_rows = ready_persisted_documents(persisted_documents)
+                if not ready_rows:
+                    st.sidebar.caption("No READY documents available.")
+                else:
+                    ready_options = [row.document_id for row in ready_rows]
+                    ready_map = {row.document_id: row for row in ready_rows}
+                    selected_persisted_ids = _safe_session_list(st.session_state.get("selected_persisted_document_ids", []))
+                    st.session_state.selected_persisted_document_ids = selected_persisted_ids
+                    default_ready_ids = [doc_id for doc_id in selected_persisted_ids if doc_id in ready_map]
+                    selected_ready_ids = st.sidebar.multiselect(
+                        "Persisted READY documents",
+                        options=ready_options,
+                        default=default_ready_ids,
+                        format_func=lambda doc_id: (
+                            f"{ready_map[doc_id].source_name} "
+                            f"[{ready_map[doc_id].source_type}:{ready_map[doc_id].status}] "
+                            f"v={ready_map[doc_id].current_version_id or 'none'}"
+                        ),
+                        help="Select READY persisted documents loaded from Postgres.",
+                    )
+                    st.session_state.selected_persisted_document_ids = selected_ready_ids
+                    st.session_state.selected_persisted_document_version_ids = [
+                        ready_map[doc_id].current_version_id
+                        for doc_id in selected_ready_ids
+                        if ready_map[doc_id].current_version_id
+                    ]
+                    persisted_document_descriptors = [
+                        to_document_descriptor(ready_map[doc_id]) for doc_id in selected_ready_ids
+                    ]
+        except Exception:
+            import traceback
+
+            st.sidebar.error("Failed to load persisted documents")
+            st.sidebar.code(traceback.format_exc())
+
     available_documents = get_available_documents(
         use_mock_backend=use_mock_backend,
         uploaded_documents=st.session_state.uploaded_documents,
     )
     document_options = {doc["id"]: doc for doc in available_documents}
 
-    valid_defaults = [doc_id for doc_id in st.session_state.selected_document_ids if doc_id in document_options]
+    selected_document_ids_state = _safe_session_list(st.session_state.get("selected_document_ids", []))
+    st.session_state.selected_document_ids = selected_document_ids_state
+    valid_defaults = [doc_id for doc_id in selected_document_ids_state if doc_id in document_options]
     if not valid_defaults and st.session_state.uploaded_documents:
         uploaded_ids = [str(doc.get("id")) for doc in st.session_state.uploaded_documents if doc.get("id")]
         valid_defaults = [doc_id for doc_id in uploaded_ids if doc_id in document_options]
-    if len(valid_defaults) != len(st.session_state.selected_document_ids):
+    if len(valid_defaults) != len(selected_document_ids_state):
         st.session_state.selected_document_ids = valid_defaults
 
     selected_document_ids = st.sidebar.multiselect(
@@ -313,7 +476,7 @@ def render_sidebar(
         ),
     )
 
-    selected_documents = [document_options[doc_id] for doc_id in selected_document_ids]
+    selected_documents = [document_options[doc_id] for doc_id in selected_document_ids] + persisted_document_descriptors
     st.session_state.selected_document_ids = selected_document_ids
     st.session_state.selected_documents = selected_documents
 
@@ -519,3 +682,26 @@ def render_download_button(final_result: dict[str, Any], debug_payload: dict[str
         mime="application/json",
         use_container_width=False,
     )
+def _file_uploader_types() -> list[str]:
+    """Return Streamlit-safe upload extension list."""
+
+    fallback = ["md", "pdf", "txt"]
+    configured = ALLOWED_EXTENSIONS
+    if isinstance(configured, type):
+        return fallback
+
+    try:
+        candidates = list(configured)
+    except TypeError:
+        return fallback
+
+    cleaned: list[str] = []
+    for ext in candidates:
+        if not isinstance(ext, str):
+            return fallback
+        normalized = ext.lstrip(".").strip().lower()
+        if not normalized:
+            return fallback
+        cleaned.append(normalized)
+
+    return sorted(set(cleaned)) or fallback

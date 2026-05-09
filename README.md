@@ -314,9 +314,79 @@ The system can run with local documents, in-memory repositories, a mock backend,
 
 **Tradeoff**
 
-- ✅ Easy inspection and iteration.
-- ✅ No hosted service required for the local path.
-- ❌ Not a production deployment architecture by itself.
+
+## Legal RAG architecture and persistent data pipeline
+
+### Overview
+This repository implements a hybrid, local-first legal RAG system using explicit orchestration graphs rather than a free-form agent loop. Retrieval and answer generation are deterministic stage flows with typed state, with optional local LLM calls used inside bounded graph nodes.
+
+Persistent ingestion is a core part of the design: document state is stored and versioned across runs, instead of relying on session-only indexing. This keeps retrieval reproducible, enables re-indexing and deletion workflows, and supports traceable evaluation.
+
+### High-level architecture (layered)
+- **UI layer (Streamlit multi-page app):** inspection and operations surfaces (query inspection, dashboards, trace/debug views, triage/review workflows).
+- **Backend adapter:** strict UI/backend boundary with mock vs real backend wiring, plus enforced final answer schema for stable rendering contracts.
+- **Orchestration graphs:**
+  - retrieval-stage graph with typed retrieval state
+  - answer-stage graph that extends retrieval state
+  - explicit path: query understanding → retrieval → answerability gate → synthesis
+- **Ingestion/data pipeline:** offline ingestion orchestration for registration, parsing, chunking, persistence, indexing, validation, lifecycle status changes, and job tracking.
+- **Storage layer:** Postgres (structured ingestion/retrieval state), Qdrant (dense vectors), and local file storage (raw source files).
+- **Observability/evaluation layer:** structured stage spans, metrics, offline eval pipelines, CI gating, and failure triage workflows.
+
+### Ingestion and persistent data pipeline
+The persistent ingestion flow is coordinated by `IngestionOrchestrator` and related services:
+
+1. Upload document.
+2. Store raw file in local document storage (`LocalDocumentStore`).
+3. Register document identity and create/reuse a document version in Postgres (`DocumentRegistry`, hash-based).
+4. Parse the file (format-specific ingestors).
+5. Create parent/child chunks.
+6. Persist chunks in Postgres.
+7. Embed child chunks.
+8. Upsert child vectors into Qdrant.
+9. Run ingestion validation checks.
+10. Mark the version `READY` and promote it as current only after validation succeeds.
+
+This ingestion path is separate from the online query path: ingestion writes/updates persistent state; query execution reads from that state.
+
+### Storage responsibilities
+- **Postgres:** source-of-truth structured state (`documents`, `document_versions`, `chunks`, `ingestion_jobs`, plus ingestion metadata and lifecycle statuses).
+- **Qdrant:** dense vector index for child chunks and vector payload metadata used during retrieval.
+- **Local file storage:** persisted raw uploaded files used for ingestion, re-indexing, and recovery operations.
+
+### Runtime query flow
+At runtime, query orchestration follows a graph-based retrieval/answer pipeline:
+
+1. Query input.
+2. Query understanding/routing (with optional rewrite/entity extraction).
+3. Hybrid retrieval (dense + sparse/BM25) and reranking.
+4. Qdrant returns child hits (point payload/IDs).
+5. Resolve child chunks from Postgres (Qdrant → Postgres resolver).
+6. Parent expansion for broader legal context.
+7. Context compression when context size thresholds are exceeded.
+8. Answerability/sufficiency gate.
+9. Grounded answer generation with citations.
+
+### Reliability and production-oriented design
+The system includes production-oriented reliability features:
+- idempotent ingestion via content hashing
+- document versioning with explicit lifecycle states
+- ingestion job tracking and retry support
+- re-indexing existing document versions
+- safe deletion workflows
+- ingestion validation before a version can be marked `READY`
+- trace metadata and stage-level spans for reproducibility/debugging
+- strict separation of offline ingestion from online query execution
+
+### Local development
+Use Docker Compose for local development with persistent services:
+- app
+- Postgres
+- Qdrant
+
+The Compose stack uses persistent volumes so database state, vectors, and stored documents survive container restarts.
+
+## Streamlit legal RAG test UI
 
 **Production reasoning**
 
@@ -966,131 +1036,79 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-### 5. Run tests
+The UI supports:
+- strict final result rendering (`answer_text`, `grounded`, `sufficient_context`, `citations`, `warnings`)
+- mock backend mode for immediate local testing
+- a clean adapter boundary for wiring your real `run_legal_rag_turn(...)` runner
+- expandable debug payload inspection panels
+
+## Persistence foundation (Postgres)
+
+For upcoming persistent ingestion pipeline work, Postgres connection settings are environment-driven:
+
+- `DATABASE_URL` (required to initialize engine/session factory)
+- `AGENTIC_RAG_DB_ECHO` (optional; `true/false`, default `false`)
+
+
+## Docker Compose local stack
+
+For a local production-like setup (app + Postgres + Qdrant), run:
 
 ```bash
-pytest -q
+docker compose up --build
 ```
 
-> Note: tests that import the Streamlit app require `streamlit` to be installed. It is listed in `requirements.txt`.
+Services and local defaults:
+- `app` (Streamlit UI on `http://localhost:8501`)
+- `postgres` (`postgres:16`)
+- `qdrant` (`qdrant/qdrant`)
 
-### 6. Run offline evals
+Configured environment variables in Compose:
+- `DATABASE_URL`
+- `QDRANT_URL`
+- `QDRANT_COLLECTION_NAME`
+- `DOCUMENT_STORAGE_PATH`
 
-Smoke eval:
+Persistent named volumes:
+- `postgres_data`
+- `qdrant_data`
+- `documents_data`
+
+## Backup and restore (local persistent RAG state)
+
+Ticket 10.2 adds local scripts to back up and restore the persisted RAG knowledge-base state used by Docker Compose.
+
+What is included in backups:
+- Postgres database dump (`agentic_rag`).
+- Qdrant collection snapshots when available (with raw Qdrant storage export fallback).
+- Stored document files from `DOCUMENT_STORAGE_PATH` (`/app/data/documents` in Compose).
+
+Create a timestamped backup:
 
 ```bash
-python evals/ci/offline_eval_ci.py run \
-  --mode smoke \
-  --output artifacts/offline_eval/smoke_run.json
+./scripts/backup_rag_state.sh
 ```
 
-Check smoke gate:
+Optional backup root folder (default is `./backups`):
 
 ```bash
-python evals/ci/offline_eval_ci.py check-gate \
-  --run-json artifacts/offline_eval/smoke_run.json \
-  --min-pass-rate 1.0 \
-  --max-runner-failures 0
+./scripts/backup_rag_state.sh /path/to/backups
 ```
 
-Full offline eval runner:
+The script creates `backups/YYYYMMDD_HHMMSS/` and fails clearly if required Docker services are not running.
+
+Restore from a specific backup folder:
 
 ```bash
-python evals/runners/run_offline_eval.py \
-  --output artifacts/offline_eval/manual_run.json \
-  --all-families
+./scripts/restore_rag_state.sh backups/YYYYMMDD_HHMMSS
 ```
 
-Build report from a candidate run:
+Restore behavior:
+- Restores Postgres schema/data from the backup dump.
+- Restores Qdrant from snapshots when present, otherwise restores raw Qdrant storage export.
+- Restores stored document files.
 
-```bash
-python evals/reports/build_report.py \
-  --candidate artifacts/offline_eval/manual_run.json \
-  --output artifacts/offline_eval/manual_report.md
-```
-
-### 7. Optional local LLM configuration
-
-The local LLM provider reads environment variables such as:
-
-```bash
-export AGENTIC_RAG_LOCAL_LLM_ENABLED=true
-export AGENTIC_RAG_LOCAL_LLM_PROVIDER=llama_cpp
-export AGENTIC_RAG_LOCAL_LLM_MODEL_PATH=/path/to/model.gguf
-export AGENTIC_RAG_LOCAL_LLM_TEMPERATURE=0.0
-export AGENTIC_RAG_LOCAL_LLM_N_CTX=4096
-export AGENTIC_RAG_LOCAL_LLM_MAX_TOKENS=512
-```
-
-If local LLM support is disabled or unavailable, the system uses deterministic fallback paths where implemented.
-
----
-
-## Current Limitations
-
-This section is intentionally explicit. The repository is engineered, but it does not claim more than it implements.
-
-| Limitation | Current state |
-|---|---|
-| Production deployment | No Dockerfile, API service, deployment manifests, or cloud infrastructure are included. |
-| Persistent vector DB runtime | Dense indexing is Qdrant-compatible by interface/payload, but concrete persistent Qdrant setup is not included. |
-| Local backend storage | The local backend builds in-memory repositories from selected documents. |
-| Sparse index persistence | BM25 index is in-memory and process-local. |
-| Reranker | Reranking is deterministic lexical scoring, not a learned cross-encoder. |
-| Optional dependencies | LangGraph, Pydantic, and tiktoken are supported opportunistically/fallback-style, but not all are listed as required runtime dependencies. |
-| Hosted LLM providers | Not implemented. Local `llama.cpp` support is implemented. |
-| Upload ingestion hook | `register_uploaded_documents` is currently a no-op hook; local backend reads selected documents directly. |
-| README media | GIF paths are placeholders unless assets are added. |
-
----
-
-## Future Improvements
-
-These are realistic next steps, not claims about current functionality.
-
-### Retrieval and indexing
-
-- Add concrete persistent Qdrant wiring and setup documentation.
-- Add caching for local document chunking/index construction.
-- Add an optional learned reranker behind the existing rerank contract.
-- Add larger-corpus retrieval performance tests.
-
-### Serving and deployment
-
-- Add an API layer if non-Streamlit consumption is needed.
-- Add Docker/deployment configuration once runtime requirements are finalized.
-- Add environment/config templates for production-like settings.
-
-### Evaluation and quality
-
-- Add coverage reporting.
-- Add static typing and lint/format configuration.
-- Add benchmark summaries generated from actual eval artifacts.
-- Add regression dashboards backed by committed or generated sample artifacts.
-
-### UX and inspection
-
-- Add demo GIFs under `assets/`.
-- Add richer retrieval trace visualization in the UI.
-- Add side-by-side comparison for baseline vs candidate eval runs.
-
----
-
-## Why This Project Matters
-
-RAG systems fail in ways that are easy to miss:
-
-- retrieving related but non-answering context,
-- synthesizing beyond the evidence,
-- hiding uncertainty,
-- losing citation traceability,
-- improving a demo while regressing evaluation behavior.
-
-Those failures are especially serious in legal AI systems, where **groundedness, sufficiency, auditability, and repeatability** matter more than conversational fluency.
-
-`Agentic_Rag` is built around that premise. It treats retrieval, answerability, synthesis, citations, traces, and evaluation as one connected system. The architecture is intentionally conservative: explicit graphs, typed contracts, deterministic fallbacks, offline quality gates, and human-review tooling.
-
-The goal is not to make the system look magical.
-
-The goal is to make it inspectable.
-
+Safety checks:
+- Fails if Docker services (`postgres`, `qdrant`, `app`) are not running.
+- Fails if the provided restore backup path does not exist.
+- Backup script avoids overwriting existing timestamped backup folders.
