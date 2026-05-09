@@ -147,6 +147,49 @@ class DenseEmbeddingService:
         return vectors
 
 
+class _SentenceTransformerEmbeddingBackend:
+    """Sentence Transformers-backed embedding adapter used by the default service."""
+
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        device: str,
+        expected_dimension: int | None = None,
+    ) -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self._model = SentenceTransformer(model_name, device=device)
+        dimension = self._model.get_sentence_embedding_dimension()
+        if dimension is None:
+            raise ValueError(
+                f"SentenceTransformer model {model_name!r} did not report an embedding dimension"
+            )
+
+        self._dimension = int(dimension)
+        if expected_dimension is not None and self._dimension != expected_dimension:
+            raise ValueError(
+                "Embedding backend dimension mismatch: "
+                f"expected={expected_dimension}, actual={self._dimension}"
+            )
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def encode(self, texts: Sequence[str], *, batch_size: int) -> list[list[float]]:
+        if not texts:
+            return []
+
+        embeddings = self._model.encode(
+            list(texts),
+            batch_size=batch_size,
+            convert_to_numpy=False,
+            convert_to_tensor=False,
+        )
+        return [[float(value) for value in embedding] for embedding in embeddings]
+
+
 @dataclass(slots=True)
 class QdrantChildChunkStore:
     """Qdrant wrapper for dense child-chunk upsert/retrieval with schema validation."""
