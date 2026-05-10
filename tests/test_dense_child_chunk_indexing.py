@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from types import SimpleNamespace
 
 import pytest
@@ -137,6 +137,19 @@ def test_default_embedding_service_uses_sentence_transformers_backend(
 ) -> None:
     init_calls: list[tuple[str, str]] = []
     encode_calls: list[tuple[list[str], int, bool, bool]] = []
+    tolist_calls = 0
+
+    class FakeBatchedEmbeddings:
+        def __init__(self, vectors: list[list[int]]) -> None:
+            self.vectors = vectors
+
+        def tolist(self) -> list[list[int]]:
+            nonlocal tolist_calls
+            tolist_calls += 1
+            return self.vectors
+
+        def __iter__(self) -> Iterator[list[int]]:
+            raise AssertionError("embeddings should be converted in batch with tolist()")
 
     class FakeSentenceTransformer:
         def __init__(self, model_name: str, *, device: str) -> None:
@@ -152,9 +165,11 @@ def test_default_embedding_service_uses_sentence_transformers_backend(
             batch_size: int,
             convert_to_numpy: bool,
             convert_to_tensor: bool,
-        ) -> list[list[int]]:
+        ) -> FakeBatchedEmbeddings:
             encode_calls.append((texts, batch_size, convert_to_numpy, convert_to_tensor))
-            return [[len(text), len(text) + 1, len(text) + 2] for text in texts]
+            return FakeBatchedEmbeddings(
+                [[len(text), len(text) + 1, len(text) + 2] for text in texts]
+            )
 
     monkeypatch.setitem(
         sys.modules,
@@ -166,14 +181,15 @@ def test_default_embedding_service_uses_sentence_transformers_backend(
         config=DenseEmbeddingConfig(
             model_name="fake-embedding-model",
             batch_size=7,
-            device="cpu",
+            device="cuda",
         )
     )
 
     assert service.dimension == 3
     assert service.embed_texts(["alpha", "be"]) == [[5.0, 6.0, 7.0], [2.0, 3.0, 4.0]]
-    assert init_calls == [("fake-embedding-model", "cpu")]
-    assert encode_calls == [(["alpha", "be"], 7, False, False)]
+    assert init_calls == [("fake-embedding-model", "cuda")]
+    assert encode_calls == [(["alpha", "be"], 7, True, False)]
+    assert tolist_calls == 1
 
 
 def test_dense_indexing_happy_path() -> None:

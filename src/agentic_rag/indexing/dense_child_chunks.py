@@ -184,10 +184,23 @@ class _SentenceTransformerEmbeddingBackend:
         embeddings = self._model.encode(
             list(texts),
             batch_size=batch_size,
-            convert_to_numpy=False,
+            convert_to_numpy=True,
             convert_to_tensor=False,
         )
-        return [[float(value) for value in embedding] for embedding in embeddings]
+        return _embeddings_to_python_vectors(embeddings)
+
+
+def _embeddings_to_python_vectors(embeddings: Any) -> list[list[float]]:
+    """Convert batched embedding outputs to Qdrant-compatible vectors."""
+
+    if hasattr(embeddings, "detach"):
+        embeddings = embeddings.detach()
+    if hasattr(embeddings, "cpu"):
+        embeddings = embeddings.cpu()
+    if hasattr(embeddings, "tolist"):
+        return embeddings.tolist()
+
+    return [list(vector) for vector in embeddings]
 
 
 @dataclass(slots=True)
