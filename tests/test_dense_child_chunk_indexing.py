@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+import types
 from collections.abc import Sequence
 
 import pytest
@@ -128,6 +130,49 @@ def _build_indexer(
     actual_client = client or InMemoryQdrantClient()
     store = QdrantChildChunkStore(client=actual_client, collection_name="child_dense")
     return (ChildChunkDenseIndexer(embedding_service=service, store=store, batch_size=index_batch_size), actual_backend, actual_client)
+
+
+def test_default_embedding_service_uses_sentence_transformer_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeVector(list[float]):
+        def astype(self, dtype: object) -> "FakeVector":
+            calls["astype_dtype"] = dtype
+            return self
+
+        def tolist(self) -> list[float]:
+            return list(self)
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str, *, device: str) -> None:
+            calls["model_name"] = model_name
+            calls["device"] = device
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return 3
+
+        def encode(self, texts: list[str], *, batch_size: int, convert_to_numpy: bool) -> list[FakeVector]:
+            calls["texts"] = texts
+            calls["batch_size"] = batch_size
+            calls["convert_to_numpy"] = convert_to_numpy
+            return [FakeVector([float(len(text)), 2.0, 3.0]) for text in texts]
+
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    service = DenseEmbeddingService(config=DenseEmbeddingConfig(model_name="test-model", batch_size=7, device="cpu"))
+
+    assert service.dimension == 3
+    assert service.embed_texts(["alpha", "be"]) == [[5.0, 2.0, 3.0], [2.0, 2.0, 3.0]]
+    assert calls == {
+        "model_name": "test-model",
+        "device": "cpu",
+        "texts": ["alpha", "be"],
+        "batch_size": 7,
+        "convert_to_numpy": True,
+        "astype_dtype": float,
+    }
 
 
 def test_dense_indexing_happy_path() -> None:

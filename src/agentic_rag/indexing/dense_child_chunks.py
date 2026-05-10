@@ -147,6 +147,41 @@ class DenseEmbeddingService:
         return vectors
 
 
+class _SentenceTransformerEmbeddingBackend:
+    """Sentence Transformers-backed embedding backend used by default."""
+
+    def __init__(self, *, model_name: str, device: str, expected_dimension: int | None = None) -> None:
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:  # pragma: no cover - exercised only when dependency is absent
+            raise ImportError(
+                "DenseEmbeddingService requires the 'sentence-transformers' package when no custom "
+                "embedding backend is supplied. Install runtime dependencies from requirements.txt "
+                "or pass an object implementing EmbeddingBackend."
+            ) from exc
+
+        self.model_name = model_name
+        self.device = device
+        self._model = SentenceTransformer(model_name, device=device)
+        model_dimension = self._model.get_sentence_embedding_dimension()
+        if model_dimension is None:
+            if expected_dimension is None:
+                raise ValueError(
+                    "SentenceTransformer did not report an embedding dimension; "
+                    "set DenseEmbeddingConfig.embedding_dimension explicitly."
+                )
+            model_dimension = expected_dimension
+        self._dimension = int(model_dimension)
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def encode(self, texts: Sequence[str], *, batch_size: int) -> list[list[float]]:
+        embeddings = self._model.encode(list(texts), batch_size=batch_size, convert_to_numpy=True)
+        return [vector.astype(float).tolist() for vector in embeddings]
+
+
 @dataclass(slots=True)
 class QdrantChildChunkStore:
     """Qdrant wrapper for dense child-chunk upsert/retrieval with schema validation."""
