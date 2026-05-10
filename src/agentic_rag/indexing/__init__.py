@@ -8,9 +8,11 @@ from .dense_child_chunks import (
     DenseEmbeddingService,
     DenseIndexingResult,
     QdrantChildChunkStore,
+    QdrantConfig,
     ChildChunkQdrantPayload,
     child_chunk_payload,
     stable_qdrant_point_id,
+    qdrant_config_from_env,
 )
 from .interfaces import Chunker, Embedder, VectorIndex
 from .sparse_child_chunks import (
@@ -32,6 +34,7 @@ __all__ = [
     "DenseEmbeddingService",
     "DenseIndexingResult",
     "QdrantChildChunkStore",
+    "QdrantConfig",
     "ChildChunkQdrantPayload",
     "ChildChunkDenseIndexer",
     "SparseIndex",
@@ -42,4 +45,5 @@ __all__ = [
     "BM25Index",
     "child_chunk_payload",
     "stable_qdrant_point_id",
+    "qdrant_config_from_env",
 ]
