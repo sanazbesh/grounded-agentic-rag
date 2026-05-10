@@ -71,8 +71,7 @@ def _build_persistent_backend_dependencies(selected_docs: list[dict[str, Any]]) 
         from sqlalchemy import func, select
         from qdrant_client import QdrantClient
 
-        from agentic_rag.ingestion_pipeline.vector_indexing import qdrant_config_from_env
-        from agentic_rag.indexing.dense_child_chunks import DEFAULT_COLLECTION_NAME
+        from agentic_rag.indexing import qdrant_config_from_env
         from agentic_rag.orchestration.legal_rag_graph import LegalRagDependencies
         from agentic_rag.orchestration.retrieval_graph import RetrievalDependencies, llm_assisted_decomposition_plan
         from agentic_rag.retrieval import (
@@ -111,9 +110,10 @@ def _build_persistent_backend_dependencies(selected_docs: list[dict[str, Any]]) 
     session_factory = get_postgres_session_factory(engine)
     session = session_factory()
     chunk_repo = PostgresChunkRepository(session=session)
-    qdrant = QdrantClient(url=qdrant_config_from_env().url)
+    qdrant_config = qdrant_config_from_env()
+    qdrant = QdrantClient(url=qdrant_config.url) if qdrant_config.url else QdrantClient()
     child_repo = PostgresResolvedQdrantChildRepository(
-        qdrant_backend=_QdrantDenseSearch(qdrant, DEFAULT_COLLECTION_NAME),
+        qdrant_backend=_QdrantDenseSearch(qdrant, qdrant_config.collection_name),
         resolver=QdrantResultResolver(chunk_repository=chunk_repo),
     )
     retrieval_tools = ParentChildRetrievalTools(

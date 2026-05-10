@@ -8,6 +8,7 @@ upserts while preserving parent linkage metadata for downstream parent fetch.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -22,6 +23,37 @@ DEFAULT_COLLECTION_NAME = "legal_child_chunks_dense"
 DEFAULT_PAYLOAD_SCHEMA_VERSION = "1.0"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True, frozen=True)
+class QdrantConfig:
+    """Environment-backed Qdrant runtime configuration."""
+
+    url: str = ""
+    collection_name: str = DEFAULT_COLLECTION_NAME
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether a Qdrant URL is explicitly configured."""
+
+        return bool(self.url)
+
+
+def qdrant_config_from_env(env: dict[str, str] | None = None) -> QdrantConfig:
+    """Load Qdrant configuration from environment variables.
+
+    Variables:
+    - QDRANT_URL
+    - QDRANT_COLLECTION_NAME
+    """
+
+    values = env if env is not None else dict(os.environ)
+    url = str(values.get("QDRANT_URL", "")).strip()
+    collection_name = (
+        str(values.get("QDRANT_COLLECTION_NAME", DEFAULT_COLLECTION_NAME)).strip()
+        or DEFAULT_COLLECTION_NAME
+    )
+    return QdrantConfig(url=url, collection_name=collection_name)
 
 
 class EmbeddingBackend(Protocol):
@@ -396,7 +428,9 @@ __all__ = [
     "DenseIndexingResult",
     "ChildChunkQdrantPayload",
     "QdrantChildChunkStore",
+    "QdrantConfig",
     "ChildChunkDenseIndexer",
     "child_chunk_payload",
     "stable_qdrant_point_id",
+    "qdrant_config_from_env",
 ]
