@@ -1,6 +1,6 @@
-# Agentic_Rag
+# grounded-agentic-rag
 
-> **Deterministic, local-first legal RAG with grounded answers, answerability gating, citations, tracing, and offline evaluation.**
+> A deterministic, local-first legal RAG system for grounded answers, answerability checks, citations, tracing, and offline evaluation.
 
 <p>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11+-blue">
@@ -12,57 +12,53 @@
   <img alt="Storage" src="https://img.shields.io/badge/Storage-Postgres%20%2B%20Qdrant-lightgrey">
 </p>
 
-`Agentic_Rag` is an engineering-focused legal retrieval-augmented generation system. It is designed around **explicit graph orchestration**, **parent-child retrieval**, **hybrid search**, **answerability assessment**, and a **strict final answer contract**.
+`grounded-agentic-rag` is an engineering-focused legal retrieval-augmented generation system, not a generic chatbot wrapper. It uses explicit orchestration, parent-child chunking, hybrid retrieval, answerability gating, and structured final outputs so answers can be inspected and evaluated. The main working path is the local in-memory backend for uploaded or selected Markdown, text, and PDF documents. Persistent Postgres/Qdrant infrastructure exists for durable storage experiments, but the full persistent vector retrieval path is still experimental and should not be treated as production-ready.
 
-This project is intentionally not a generic chatbot wrapper. It is a transparent RAG system where every answer is routed through retrieval, evidence sufficiency checks, grounded synthesis, citations, warnings, tracing, and offline evaluation.
+## What this project demonstrates
 
-> **Accuracy note:** this README distinguishes fully implemented local/in-memory behavior from partially wired persistent infrastructure. Postgres/Qdrant storage foundations exist, but the persistent vector retrieval path should be treated as experimental until the dependency/configuration gaps listed in [Known Limitations](#known-limitations) are resolved.
+- Deterministic legal RAG orchestration
+- Parent-child chunking
+- Hybrid retrieval with fusion/reranking
+- Answerability gating before synthesis
+- Structured citations and warnings
+- Streamlit inspection UI
+- Offline evaluation and observability artifacts
 
+## Current status
 
----
+| Mode | Status | Notes |
+|---|---|---|
+| Mock backend | Implemented | UI/demo path |
+| Local in-memory backend | Implemented | Main working RAG path |
+| Persistent Postgres/Qdrant backend | Experimental | Storage foundations exist, runtime path still being wired |
 
-## Table of Contents
+## Quick start
 
-- [Short Project Introduction](#short-project-introduction)
-- [Architecture Overview](#architecture-overview)
-- [Multi-Mode Runtime Architecture](#multi-mode-runtime-architecture)
-- [Persistent Architecture & Storage Layer](#persistent-architecture--storage-layer)
-- [Key Architectural Design Decisions](#key-architectural-design-decisions)
-- [End-to-End Pipeline](#end-to-end-pipeline)
-- [Repository Structure](#repository-structure)
-- [Retrieval Architecture Deep Dive](#retrieval-architecture-deep-dive)
-- [Answer Generation & Safety](#answer-generation--safety)
-- [Evaluation & Observability](#evaluation--observability)
-- [Streamlit Inspection UI](#streamlit-inspection-ui)
-- [Example Query Flow](#example-query-flow)
-- [Tech Stack](#tech-stack)
-- [Running Locally](#running-locally)
-- [Known Limitations](#known-limitations)
-- [Future Improvements](#future-improvements)
-- [Why This Project Matters](#why-this-project-matters)
+```bash
+git clone https://github.com/sanazbesh/grounded-agentic-rag.git
+cd grounded-agentic-rag
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+pytest
+```
 
----
+Windows PowerShell activation:
 
-## Short Project Introduction
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-Legal RAG systems need to answer a harder question than “what text looks relevant?” They also need to decide **whether the evidence is strong enough to answer at all**.
+## Why this project matters
 
-`Agentic_Rag` addresses that problem with a deterministic legal RAG architecture:
+Legal RAG systems need more than plausible prose: they need evidence-aware retrieval, citations, answerability checks, safe failure behavior, and repeatable evaluation. `grounded-agentic-rag` exposes those moving parts as inspectable engineering components so technical reviewers can trace how a question becomes a grounded answer—or why the system refuses to answer.
 
-- **Grounded answers** are generated only from retrieved context.
-- **Citations** are preserved as structured output, not buried inside prose.
-- **Answerability gating** checks whether the retrieved evidence is sufficient before synthesis.
-- **Parent-child retrieval** uses small chunks for search and larger parent chunks for legal context.
-- **Evaluation tooling** is included as a first-class part of the system, not an afterthought.
-- **Streamlit dashboards** make retrieval, citations, traces, failures, and quality artifacts inspectable.
+<details>
+<summary>Architecture overview</summary>
 
-The result is a local-first AI system that is easier to debug, test, and explain than an open-ended agent loop.
-
----
-
-## Architecture Overview
-
-### High-level system diagram
+#### High-level system diagram
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -105,7 +101,7 @@ The result is a local-first AI system that is easier to debug, test, and explain
                                   └────────────────────────────────────┘
 ```
 
-### Component relationship diagram
+#### Component relationship diagram
 
 ```text
 app.py
@@ -124,7 +120,7 @@ app.py
      └─ legal_rag_graph.py     # answer-stage graph
 ```
 
-### Retrieval + answer flow visualization
+#### Retrieval + answer flow visualization
 
 ```text
 User question
@@ -164,7 +160,7 @@ Answerability assessment
 Strict final answer contract
 ```
 
-### Layer responsibilities
+#### Layer responsibilities
 
 | Layer | Responsibility | Primary modules |
 |---|---|---|
@@ -181,251 +177,9 @@ Strict final answer contract
 
 ---
 
-## Multi-Mode Runtime Architecture
-
-The repository supports three runtime modes with different maturity levels.
-
-### Runtime mode comparison
-
-| Mode | Status | Purpose | Dependencies | Tradeoffs | Intended use |
-|---|---:|---|---|---|---|
-| **Mock backend** | ✅ Implemented | Fast deterministic UI demos without real retrieval | Streamlit only | Does not exercise real RAG logic | UI development, screenshots, demos |
-| **Local in-memory backend** | ✅ Implemented | Real local RAG over selected uploaded/local docs | Streamlit, PyMuPDF, pymupdf4llm, local Python modules | Data is rebuilt in memory; not durable | Local experimentation, interview demos, architecture inspection |
-| **Persistent Postgres/Qdrant backend** | ⚠️ Partially wired / experimental | Durable document metadata/chunks and intended vector-backed retrieval | Postgres, Qdrant, SQLAlchemy, psycopg, plus additional optional client/model dependencies | Persistence foundations exist, but some runtime wiring/dependencies need cleanup | Future production-like local stack, persistent ingestion experiments |
-
-### 1. Mock backend
-
-```text
-Streamlit UI ──► ui/backend_adapter.py ──► ui/mock_backend.py ──► validated final result
-```
-
-**What it is:** deterministic sample responses and document descriptors for exercising the UI.
-
-**Why it exists:** the UI can be developed and demonstrated even when no documents, models, vector stores, or databases are available.
-
-**What it does not do:** real retrieval, answerability, or grounded synthesis.
-
-### 2. Local in-memory backend
-
-```text
-Selected files
-   │
-   v
-Markdown/PDF ingestion
-   │
-   v
-Parent-child chunking
-   │
-   v
-In-memory child records + parent lookup
-   │
-   v
-LegalRagDependencies
-   │
-   v
-Retrieval graph + answer graph
-```
-
-**What it is:** the primary working path for local RAG experimentation.
-
-**Implemented behavior:**
-
-- loads selected `.md`, `.txt`, and `.pdf` documents,
-- chunks them into parent/child records,
-- builds in-memory retrieval repositories,
-- runs the deterministic retrieval and answer graphs,
-- returns strict final answers with citations/warnings.
-
-**Tradeoff:** simple and transparent, but not durable and not designed for large persistent corpora.
-
-### 3. Persistent Postgres/Qdrant backend
-
-```text
-Postgres metadata/chunks
-        │
-        │       Qdrant child vectors
-        │              │
-        └──────┬───────┘
-               v
-   Qdrant hit resolution
-               │
-               v
-   Postgres chunk lookup
-               │
-               v
-   Parent expansion + answer graph
-```
-
-**What is implemented:**
-
-- SQLAlchemy models for documents, document versions, chunks, and ingestion jobs.
-- Local document file storage abstraction.
-- Document registry and ingestion job services.
-- Chunk persistence for parent/child chunks.
-- Qdrant-like dense indexing abstractions.
-- Qdrant-hit-to-Postgres-chunk resolution classes.
-- Docker Compose services for app, Postgres, and Qdrant.
-
-**What is partial/experimental:**
-
-- Persistent UI ingestion currently constructs the ingestion orchestrator without vector indexing service wiring.
-- Persistent app wiring imports Qdrant client/config pieces that require cleanup and dependency declaration.
-- The Qdrant collection name is not fully centralized across Compose and code defaults.
-
-Use persistent mode as an architecture foundation and local experiment path, not as a production-ready deployment claim.
-
 ---
 
-## Persistent Architecture & Storage Layer
-
-Persistence exists to support durable document lifecycle tracking, reindexing, chunk persistence, and a future fully wired persistent retrieval path.
-
-### Storage architecture diagram
-
-```text
-┌────────────────────────────┐
-│ Uploaded / source document │
-└──────────────┬─────────────┘
-               │
-               v
-┌────────────────────────────┐
-│ LocalDocumentStore          │
-│ filesystem bytes            │
-└──────────────┬─────────────┘
-               │ storage_path
-               v
-┌────────────────────────────┐
-│ Postgres                    │
-│ documents                   │
-│ document_versions           │
-│ chunks                      │
-│ ingestion_jobs              │
-└──────────────┬─────────────┘
-               │ child chunk text + ids
-               v
-┌────────────────────────────┐
-│ Qdrant-compatible vector    │
-│ child chunk points          │
-└──────────────┬─────────────┘
-               │ qdrant hit payload / point id
-               v
-┌────────────────────────────┐
-│ QdrantResultResolver        │
-│ resolves hits to Postgres   │
-│ chunk rows                  │
-└──────────────┬─────────────┘
-               v
-┌────────────────────────────┐
-│ Parent chunk retrieval      │
-│ answer context              │
-└────────────────────────────┘
-```
-
-### Persistent data model
-
-```text
-Document
-  └── DocumentVersion
-        ├── Parent Chunk rows
-        │     └── Child Chunk rows
-        └── IngestionJob rows
-
-Child Chunk rows
-  └── qdrant_point_id
-        └── Qdrant vector point
-```
-
-| Persistent entity | Purpose |
-|---|---|
-| `Document` | Canonical source document with current version pointer and lifecycle status |
-| `DocumentVersion` | Immutable content revision with hash, parser/chunker/version metadata, storage path, and status |
-| `Chunk` | Parent and child chunk rows, including parent linkage and optional Qdrant point ID |
-| `IngestionJob` | Processing lifecycle record with status, timestamps, and error message |
-| `LocalDocumentStore` | Filesystem-backed storage for original document bytes |
-
-### Ingestion lifecycle diagram
-
-```text
-Upload / file path
-   │
-   v
-Validate input
-   │
-   v
-Register Document + DocumentVersion
-   │
-   v
-Save bytes to LocalDocumentStore
-   │
-   v
-Create IngestionJob(PENDING)
-   │
-   v
-PROCESSING
-   │
-   ├─ parse Markdown/PDF
-   ├─ chunk into parent/child records
-   ├─ persist chunks to Postgres
-   ├─ optionally index child vectors
-   └─ validate persisted artifacts
-   │
-   ├────────────── success ──────────────► READY + promote version
-   │
-   └────────────── failure ──────────────► FAILED + error_message
-```
-
-### Persistent retrieval flow diagram
-
-```text
-Query
-  │
-  v
-Dense Qdrant search
-  │
-  v
-Raw Qdrant hit
-  │
-  ├─ payload.chunk_id / payload.child_chunk_id
-  └─ or raw point id
-  │
-  v
-QdrantResultResolver
-  │
-  v
-PostgresChunkRepository.get_chunk_by_id / resolve_qdrant_point_id
-  │
-  v
-ChildSearchResult
-  │
-  v
-Hybrid/Rerank/Parent expansion
-  │
-  v
-Answerability + grounded answer
-```
-
-### Why parent-child linkage matters in persistent retrieval
-
-Dense retrieval operates on **child chunks** because they are small and targeted. Legal answer generation needs **parent chunks** because legal obligations, exceptions, definitions, and qualifiers often span more context than a small retrieval chunk.
-
-Persistent retrieval therefore needs a reliable chain:
-
-```text
-Qdrant child vector hit
-   → child chunk row in Postgres
-   → parent_chunk_id
-   → parent chunk row in Postgres
-   → answer context
-   → citation back to parent/document/source
-```
-
-This design preserves traceability from final answer citations back to durable storage records.
-
----
-
-## Key Architectural Design Decisions
-
-### 1. Deterministic orchestration over autonomous loops
+#### 1. Deterministic orchestration over autonomous loops
 
 **Why it exists:** legal RAG needs predictable behavior, bounded control flow, and debuggable failures.
 
@@ -437,7 +191,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 2. Parent-child chunking
+#### 2. Parent-child chunking
 
 **Why it exists:** retrieval works best with small, focused chunks; legal answer generation needs larger context.
 
@@ -449,7 +203,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 3. Hybrid retrieval
+#### 3. Hybrid retrieval
 
 **Why it exists:** legal search needs exact terms, citations, dates, parties, and clause labels, but also benefits from semantic matching.
 
@@ -461,7 +215,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 4. Answerability gate
+#### 4. Answerability gate
 
 **Why it exists:** the system should know when not to answer.
 
@@ -473,7 +227,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 5. Grounded synthesis
+#### 5. Grounded synthesis
 
 **Why it exists:** final answers should be tied to retrieved context and auditable citations.
 
@@ -485,7 +239,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 6. Local-first design
+#### 6. Local-first design
 
 **Why it exists:** legal documents are often sensitive, and local demos should not require cloud services.
 
@@ -497,7 +251,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 7. Evaluation-first architecture
+#### 7. Evaluation-first architecture
 
 **Why it exists:** RAG quality cannot be judged from demos alone.
 
@@ -509,7 +263,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 8. Immutable document versions
+#### 8. Immutable document versions
 
 **Why it exists:** legal documents change, and answers should be attributable to a specific content revision.
 
@@ -521,7 +275,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 9. Explicit lifecycle states
+#### 9. Explicit lifecycle states
 
 **Why it exists:** ingestion and indexing can fail at many stages.
 
@@ -533,7 +287,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 10. Typed contracts
+#### 10. Typed contracts
 
 **Why it exists:** AI systems fail more safely when boundaries are explicit.
 
@@ -545,7 +299,7 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-### 11. Retrieval/answer separation
+#### 11. Retrieval/answer separation
 
 **Why it exists:** retrieval quality and synthesis quality should be independently inspectable.
 
@@ -557,9 +311,9 @@ This design preserves traceability from final answer citations back to durable s
 
 ---
 
-## End-to-End Pipeline
+---
 
-### Main RAG pipeline
+#### Main RAG pipeline
 
 ```text
 1. Document ingestion
@@ -600,7 +354,7 @@ This design preserves traceability from final answer citations back to durable s
     └─ answer_text · grounded · sufficient_context · citations · warnings
 ```
 
-### Persistent ingestion pipeline
+#### Persistent ingestion pipeline
 
 ```text
 File upload/path
@@ -633,7 +387,7 @@ IngestionValidationService.validate
 READY / FAILED lifecycle status
 ```
 
-### Stage implementation map
+#### Stage implementation map
 
 | Stage | Primary files/modules | Key classes/functions |
 |---|---|---|
@@ -654,7 +408,749 @@ READY / FAILED lifecycle status
 
 ---
 
-## Repository Structure
+---
+
+| Category | Technology / pattern | Status | Where used |
+|---|---|---:|---|
+| Language | Python | ✅ Implemented | Entire repository |
+| UI | Streamlit | ✅ Implemented | `app.py`, `ui/` |
+| PDF parsing | PyMuPDF / `fitz` | ✅ Implemented | `src/agentic_rag/ingestion/converters.py` |
+| PDF → Markdown | `pymupdf4llm` | ✅ Implemented | `src/agentic_rag/ingestion/converters.py` |
+| Local LLM | `llama-cpp-python` | ⚙️ Optional | `src/agentic_rag/llm/local_provider.py` |
+| Graph runtime | LangGraph | ⚙️ Optional fallback-supported import | `retrieval_graph.py`, `legal_rag_graph.py` |
+| Data modeling | Pydantic-compatible models | ⚙️ Optional fallback shim exists | `_compat_pydantic.py`, graph/tool models |
+| ORM | SQLAlchemy | ✅ Implemented | `src/agentic_rag/storage/models.py`, `postgres.py` |
+| Database | Postgres | ⚠️ Persistent foundation | `docker-compose.yml`, storage config |
+| Vector store | Qdrant | ⚠️ Persistent foundation / experimental runtime path | `docker-compose.yml`, Qdrant-compatible indexing/resolution modules |
+| Sparse retrieval | BM25-style in-memory sparse retrieval | ✅ Implemented | `src/agentic_rag/indexing/sparse_child_chunks.py` |
+| Hybrid retrieval | Reciprocal Rank Fusion | ✅ Implemented | `src/agentic_rag/retrieval/parent_child.py` |
+| Testing | pytest | ✅ Implemented | `tests/` |
+| Containers | Docker | ✅ Implemented | `Dockerfile` |
+| Local stack | Docker Compose | ✅ Implemented | `docker-compose.yml` |
+| CI quality | GitHub Actions offline eval workflows | ✅ Implemented | `.github/workflows/` |
+
+---
+
+</details>
+
+<details>
+<summary>Runtime modes</summary>
+
+The repository supports three runtime modes with different maturity levels.
+
+#### Runtime mode comparison
+
+| Mode | Status | Purpose | Dependencies | Tradeoffs | Intended use |
+|---|---:|---|---|---|---|
+| **Mock backend** | ✅ Implemented | Fast deterministic UI demos without real retrieval | Streamlit only | Does not exercise real RAG logic | UI development, screenshots, demos |
+| **Local in-memory backend** | ✅ Implemented | Real local RAG over selected uploaded/local docs | Streamlit, PyMuPDF, pymupdf4llm, local Python modules | Data is rebuilt in memory; not durable | Local experimentation, interview demos, architecture inspection |
+| **Persistent Postgres/Qdrant backend** | ⚠️ Partially wired / experimental | Durable document metadata/chunks and intended vector-backed retrieval | Postgres, Qdrant, SQLAlchemy, psycopg, plus additional optional client/model dependencies | Persistence foundations exist, but some runtime wiring/dependencies need cleanup | Future production-like local stack, persistent ingestion experiments |
+
+#### 1. Mock backend
+
+```text
+Streamlit UI ──► ui/backend_adapter.py ──► ui/mock_backend.py ──► validated final result
+```
+
+**What it is:** deterministic sample responses and document descriptors for exercising the UI.
+
+**Why it exists:** the UI can be developed and demonstrated even when no documents, models, vector stores, or databases are available.
+
+**What it does not do:** real retrieval, answerability, or grounded synthesis.
+
+#### 2. Local in-memory backend
+
+```text
+Selected files
+   │
+   v
+Markdown/PDF ingestion
+   │
+   v
+Parent-child chunking
+   │
+   v
+In-memory child records + parent lookup
+   │
+   v
+LegalRagDependencies
+   │
+   v
+Retrieval graph + answer graph
+```
+
+**What it is:** the primary working path for local RAG experimentation.
+
+**Implemented behavior:**
+
+- loads selected `.md`, `.txt`, and `.pdf` documents,
+- chunks them into parent/child records,
+- builds in-memory retrieval repositories,
+- runs the deterministic retrieval and answer graphs,
+- returns strict final answers with citations/warnings.
+
+**Tradeoff:** simple and transparent, but not durable and not designed for large persistent corpora.
+
+#### 3. Persistent Postgres/Qdrant backend
+
+```text
+Postgres metadata/chunks
+        │
+        │       Qdrant child vectors
+        │              │
+        └──────┬───────┘
+               v
+   Qdrant hit resolution
+               │
+               v
+   Postgres chunk lookup
+               │
+               v
+   Parent expansion + answer graph
+```
+
+**What is implemented:**
+
+- SQLAlchemy models for documents, document versions, chunks, and ingestion jobs.
+- Local document file storage abstraction.
+- Document registry and ingestion job services.
+- Chunk persistence for parent/child chunks.
+- Qdrant-like dense indexing abstractions.
+- Qdrant-hit-to-Postgres-chunk resolution classes.
+- Docker Compose services for app, Postgres, and Qdrant.
+
+**What is partial/experimental:**
+
+- Persistent UI ingestion currently constructs the ingestion orchestrator without vector indexing service wiring.
+- Persistent app wiring imports Qdrant client/config pieces that require cleanup and dependency declaration.
+- The Qdrant collection name is not fully centralized across Compose and code defaults.
+
+Use persistent mode as an architecture foundation and local experiment path, not as a production-ready deployment claim.
+
+---
+
+</details>
+
+<details>
+<summary>Persistent storage and Postgres/Qdrant path</summary>
+
+> Persistent Postgres/Qdrant support is an experimental storage and retrieval foundation. It is useful for local architecture experiments, but it is not presented as production-ready.
+
+Persistence exists to support durable document lifecycle tracking, reindexing, chunk persistence, and a future fully wired persistent retrieval path.
+
+#### Storage architecture diagram
+
+```text
+┌────────────────────────────┐
+│ Uploaded / source document │
+└──────────────┬─────────────┘
+               │
+               v
+┌────────────────────────────┐
+│ LocalDocumentStore          │
+│ filesystem bytes            │
+└──────────────┬─────────────┘
+               │ storage_path
+               v
+┌────────────────────────────┐
+│ Postgres                    │
+│ documents                   │
+│ document_versions           │
+│ chunks                      │
+│ ingestion_jobs              │
+└──────────────┬─────────────┘
+               │ child chunk text + ids
+               v
+┌────────────────────────────┐
+│ Qdrant-compatible vector    │
+│ child chunk points          │
+└──────────────┬─────────────┘
+               │ qdrant hit payload / point id
+               v
+┌────────────────────────────┐
+│ QdrantResultResolver        │
+│ resolves hits to Postgres   │
+│ chunk rows                  │
+└──────────────┬─────────────┘
+               v
+┌────────────────────────────┐
+│ Parent chunk retrieval      │
+│ answer context              │
+└────────────────────────────┘
+```
+
+#### Persistent data model
+
+```text
+Document
+  └── DocumentVersion
+        ├── Parent Chunk rows
+        │     └── Child Chunk rows
+        └── IngestionJob rows
+
+Child Chunk rows
+  └── qdrant_point_id
+        └── Qdrant vector point
+```
+
+| Persistent entity | Purpose |
+|---|---|
+| `Document` | Canonical source document with current version pointer and lifecycle status |
+| `DocumentVersion` | Immutable content revision with hash, parser/chunker/version metadata, storage path, and status |
+| `Chunk` | Parent and child chunk rows, including parent linkage and optional Qdrant point ID |
+| `IngestionJob` | Processing lifecycle record with status, timestamps, and error message |
+| `LocalDocumentStore` | Filesystem-backed storage for original document bytes |
+
+#### Ingestion lifecycle diagram
+
+```text
+Upload / file path
+   │
+   v
+Validate input
+   │
+   v
+Register Document + DocumentVersion
+   │
+   v
+Save bytes to LocalDocumentStore
+   │
+   v
+Create IngestionJob(PENDING)
+   │
+   v
+PROCESSING
+   │
+   ├─ parse Markdown/PDF
+   ├─ chunk into parent/child records
+   ├─ persist chunks to Postgres
+   ├─ optionally index child vectors
+   └─ validate persisted artifacts
+   │
+   ├────────────── success ──────────────► READY + promote version
+   │
+   └────────────── failure ──────────────► FAILED + error_message
+```
+
+#### Persistent retrieval flow diagram
+
+```text
+Query
+  │
+  v
+Dense Qdrant search
+  │
+  v
+Raw Qdrant hit
+  │
+  ├─ payload.chunk_id / payload.child_chunk_id
+  └─ or raw point id
+  │
+  v
+QdrantResultResolver
+  │
+  v
+PostgresChunkRepository.get_chunk_by_id / resolve_qdrant_point_id
+  │
+  v
+ChildSearchResult
+  │
+  v
+Hybrid/Rerank/Parent expansion
+  │
+  v
+Answerability + grounded answer
+```
+
+#### Why parent-child linkage matters in persistent retrieval
+
+Dense retrieval operates on **child chunks** because they are small and targeted. Legal answer generation needs **parent chunks** because legal obligations, exceptions, definitions, and qualifiers often span more context than a small retrieval chunk.
+
+Persistent retrieval therefore needs a reliable chain:
+
+```text
+Qdrant child vector hit
+   → child chunk row in Postgres
+   → parent_chunk_id
+   → parent chunk row in Postgres
+   → answer context
+   → citation back to parent/document/source
+```
+
+This design preserves traceability from final answer citations back to durable storage records.
+
+---
+
+</details>
+
+<details>
+<summary>Retrieval architecture</summary>
+
+#### Retrieval flow
+
+```text
+Query
+  │
+  v
+┌───────────────────────────────┐
+│ Query intelligence             │
+│ classify · rewrite · entities  │
+└───────────────┬───────────────┘
+                │
+                v
+┌───────────────────────────────┐
+│ Dense-compatible child search  │
+└───────────────┬───────────────┘
+                │
+                │       ┌───────────────────────────────┐
+                └──────►│ Sparse/BM25 child search       │
+                        └───────────────┬───────────────┘
+                                        │
+                                        v
+                        ┌───────────────────────────────┐
+                        │ Reciprocal Rank Fusion         │
+                        └───────────────┬───────────────┘
+                                        │
+                                        v
+                        ┌───────────────────────────────┐
+                        │ Chunk reranking                │
+                        └───────────────┬───────────────┘
+                                        │
+                                        v
+                        ┌───────────────────────────────┐
+                        │ Parent expansion               │
+                        │ child → parent context          │
+                        └───────────────┬───────────────┘
+                                        v
+                              Answerability + synthesis
+```
+
+#### Dense retrieval
+
+Dense retrieval is represented through Qdrant-compatible abstractions:
+
+- `DenseEmbeddingService`
+- `QdrantChildChunkStore`
+- `ChildChunkDenseIndexer`
+- `ChildChunkQdrantPayload`
+
+Dense child chunks preserve parent linkage in payloads so downstream retrieval can expand from a small hit to a larger parent context.
+
+#### Sparse retrieval
+
+Sparse retrieval is implemented as an in-memory BM25-style path for child chunks. This matters for legal search because exact terms often matter:
+
+- party names,
+- clause labels,
+- dates,
+- statutory phrases,
+- legal terms of art.
+
+#### Reciprocal Rank Fusion
+
+Hybrid retrieval uses **Reciprocal Rank Fusion (RRF)** instead of adding raw dense and sparse scores. Dense and sparse scores are not naturally comparable, but ranks are stable and interpretable.
+
+```text
+Dense rank list      Sparse rank list
+      │                    │
+      └────────┬───────────┘
+               v
+          RRF fusion
+               │
+               v
+       HybridSearchResult[]
+```
+
+#### Reranking
+
+After RRF, child hits are reranked before parent expansion. This gives the system another deterministic opportunity to prioritize issue-focused chunks before selecting parent context.
+
+#### Parent expansion
+
+The answer stage does not rely on child chunk text alone. It expands child hits to parent chunks:
+
+```text
+HybridSearchResult.child_chunk_id
+  └── parent_chunk_id
+        └── ParentChunkResult.text
+              └── answer context
+```
+
+This is especially important in legal documents because qualifiers, exceptions, and definitions are often near—but not inside—the exact matching sentence.
+
+#### Qdrant → Postgres resolution flow
+
+```text
+Qdrant raw hit
+  │
+  ├─ payload.chunk_id / child_chunk_id
+  └─ raw point id
+  │
+  v
+QdrantResultResolver
+  │
+  v
+PostgresChunkRepository
+  │
+  v
+Persisted child chunk row
+  │
+  v
+ChildSearchResult(parent_chunk_id=...)
+  │
+  v
+ParentChunkRepository.get_by_ids(...)
+```
+
+This keeps dense vector retrieval tied to durable chunk records rather than treating vector payloads as the system of record.
+
+---
+
+</details>
+
+<details>
+<summary>Answer generation, safety, and final contract</summary>
+
+Legal answer generation is designed around **trustworthiness** rather than fluency alone.
+
+#### Safety flow
+
+```text
+Retrieved parent context
+   │
+   v
+Evidence unit normalization
+   │
+   v
+Answerability assessment
+   │
+   ├─ no context ──────────────► insufficient-context response
+   ├─ weak context ────────────► safe/qualified response path
+   └─ sufficient context ──────► grounded synthesis
+                                  │
+                                  v
+                              citation validation
+                                  │
+                                  v
+                              final contract
+```
+
+#### Answerability gating
+
+The answerability layer evaluates:
+
+- whether relevant context exists,
+- whether evidence is sufficient,
+- whether support is partial or weak,
+- whether the query needs clarification,
+- whether a safe failure is more appropriate than an answer.
+
+#### Grounded synthesis
+
+The default synthesizer is deterministic and extractive:
+
+- it ranks relevant context,
+- extracts supporting excerpts,
+- builds structured citations,
+- adds caveats when evidence appears partial,
+- preserves warnings separately from the answer text.
+
+Optional local LLM drafting can be enabled for selected stages, but deterministic fallback remains part of the design.
+
+#### Citation enforcement
+
+The final answer model separates citations from prose. A grounded answer is expected to carry citations. The graph validation path downgrades unsupported groundedness when citations are missing.
+
+#### Final answer contract
+
+Every real backend result must satisfy:
+
+```json
+{
+  "answer_text": "string",
+  "grounded": true,
+  "sufficient_context": true,
+  "citations": [],
+  "warnings": []
+}
+```
+
+The UI adapter validates this shape before rendering.
+
+---
+
+---
+
+#### Example legal question walkthrough
+
+```text
+User query:
+"Who is the employer under this agreement?"
+
+1. Query understanding
+   └─ detects a party-role/entity lookup style question
+
+2. Retrieval
+   ├─ searches child chunks for party/role language
+   ├─ fuses dense/sparse signals where available
+   └─ reranks relevant child chunks
+
+3. Parent expansion
+   └─ fetches larger parent chunks containing agreement introduction/context
+
+4. Answerability
+   └─ checks whether retrieved context contains enough party-role evidence
+
+5. Grounded synthesis
+   ├─ extracts supporting party-role evidence
+   ├─ writes a direct answer
+   └─ attaches citations to parent chunks/source headings
+
+6. Final contract
+   └─ answer_text, grounded, sufficient_context, citations, warnings
+```
+
+#### Persistent ingestion example
+
+```text
+Upload employment-agreement.pdf
+   │
+   v
+Validate filename and payload
+   │
+   v
+Register Document + DocumentVersion
+   │
+   v
+Save bytes to DOCUMENT_STORAGE_PATH
+   │
+   v
+Create ingestion job
+   │
+   v
+PDF → Markdown
+   │
+   v
+Parent/child chunking
+   │
+   v
+Persist chunks to Postgres
+   │
+   v
+Optional child vector indexing
+   │
+   v
+Validation + lifecycle status
+   │
+   v
+Future persistent retrieval path:
+Qdrant hit → Postgres child row → parent chunk → answer generation
+```
+
+> Persistent ingestion and storage foundations are implemented, but the complete persistent vector retrieval path should be treated as experimental until the known wiring/dependency issues are addressed.
+
+---
+
+</details>
+
+<details>
+<summary>Evaluation and observability</summary>
+
+This repository treats quality infrastructure as part of the architecture.
+
+#### Evaluation stack
+
+```text
+JSONL eval datasets
+   │
+   v
+Offline eval runner
+   │
+   ├─ system execution
+   ├─ deterministic graders
+   ├─ optional LLM judge parsers
+   └─ JSON run artifact
+   │
+   v
+Reports / dashboards / CI gates
+```
+
+#### Implemented evaluation components
+
+| Component | Purpose | Location |
+|---|---|---|
+| Eval datasets | Regression and tiered legal test cases | `evals/datasets/` |
+| Fixture docs | Local offline document corpus | `evals/fixtures/offline_documents/` |
+| Eval schema | JSON schema for legal eval cases | `evals/schema/legal_eval_case.json` |
+| Eval runner | Executes cases and writes machine-readable results | `evals/runners/run_offline_eval.py` |
+| CI wrapper | Selects families, runs eval modes, enforces gates | `evals/ci/offline_eval_ci.py` |
+| Deterministic graders | Contract, citation, retrieval, answerability, routing checks | `evals/graders/` |
+| LLM judge parsers | Answer correctness, groundedness, safe failure parsing | `evals/graders/llm_judges/` |
+| Reports | Markdown reports, dashboard data, triage, review queues | `evals/reports/` |
+
+#### CI workflows
+
+| Workflow | Trigger | Behavior |
+|---|---|---|
+| Offline Eval PR Gates | Pull requests | Runs smoke evals and touched-family evals, enforces pass-rate gates |
+| Offline Eval Nightly Regression | Scheduled/manual | Runs full offline regression and builds markdown report |
+
+#### Observability components
+
+- Structured trace helpers in `src/agentic_rag/orchestration/tracing.py`.
+- Metrics emission and aggregation in `src/agentic_rag/orchestration/metrics.py`.
+- Trace schema docs in `observability/schema/trace_schema.md`.
+- Streamlit trace dashboard in `ui/trace_dashboard.py`.
+- Quality dashboard in `ui/quality_dashboard.py`.
+- Failure triage dashboard in `ui/triage_dashboard.py`.
+- Human review queue dashboard in `ui/review_queue_dashboard.py`.
+- Online shadow grading support in `src/agentic_rag/orchestration/online_shadow_grading.py`.
+- Production traffic sampling helpers in `src/agentic_rag/orchestration/traffic_sampling.py`.
+
+---
+
+---
+
+#### Docker Compose local stack
+
+The repository includes a local stack with Streamlit, Postgres, and Qdrant:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+| Service | Purpose | Local port |
+|---|---|---:|
+| `app` | Streamlit UI | `8501` |
+| `postgres` | Persistent metadata/chunks/jobs | `5432` |
+| `qdrant` | Vector storage service | `6333`, `6334` |
+
+Configured app environment variables in Compose:
+
+```text
+DATABASE_URL
+QDRANT_URL
+QDRANT_COLLECTION_NAME
+DOCUMENT_STORAGE_PATH
+```
+
+> Persistent mode is useful for exercising storage foundations. Treat complete persistent vector retrieval as experimental until the known limitations are resolved.
+
+---
+
+#### Local LLM configuration
+
+Local LLM support is optional and uses environment-backed config. Relevant variables include:
+
+```bash
+export AGENTIC_RAG_LOCAL_LLM_ENABLED=true
+export AGENTIC_RAG_LOCAL_LLM_PROVIDER=llama_cpp
+export AGENTIC_RAG_LOCAL_LLM_MODEL_PATH=/path/to/model.gguf
+export AGENTIC_RAG_LOCAL_LLM_N_CTX=4096
+export AGENTIC_RAG_LOCAL_LLM_TEMPERATURE=0.0
+export AGENTIC_RAG_LOCAL_LLM_TIMEOUT_SECONDS=8.0
+export AGENTIC_RAG_LOCAL_LLM_MAX_TOKENS=512
+```
+
+The UI also exposes stage toggles for rewrite, decomposition, and synthesis when local LLM mode is enabled.
+
+---
+
+#### Run offline eval helpers
+
+Smoke eval:
+
+```bash
+python evals/ci/offline_eval_ci.py run \
+  --mode smoke \
+  --output artifacts/offline_eval/smoke_run.json
+```
+
+Check smoke gate:
+
+```bash
+python evals/ci/offline_eval_ci.py check-gate \
+  --run-json artifacts/offline_eval/smoke_run.json \
+  --min-pass-rate 1.0 \
+  --max-runner-failures 0
+```
+
+Family eval:
+
+```bash
+python evals/ci/offline_eval_ci.py run \
+  --mode family \
+  --family party_role \
+  --output artifacts/offline_eval/family_run.json
+```
+
+Full eval:
+
+```bash
+python evals/ci/offline_eval_ci.py run \
+  --mode full \
+  --output artifacts/offline_eval/full_run.json
+```
+
+Build a report from an eval run:
+
+```bash
+python evals/reports/build_report.py \
+  --candidate artifacts/offline_eval/full_run.json \
+  --output artifacts/offline_eval/full_report.md
+```
+
+---
+
+</details>
+
+<details>
+<summary>Streamlit inspection UI</summary>
+
+The Streamlit UI is a local-first inspection environment for the RAG pipeline.
+
+#### UI capabilities
+
+| UI area | Purpose |
+|---|---|
+| Sidebar runtime controls | Choose mock/real mode, upload/select documents, configure local LLM options |
+| Query panel | Submit legal questions and optional conversation context |
+| Answer panel | Render final answer text and warnings |
+| Citation panel | Inspect structured citations |
+| Debug payload panel | Inspect raw debug/state payloads |
+| Quality dashboard | Explore offline eval quality artifacts |
+| Trace dashboard | Inspect trace data and spans |
+| Triage dashboard | Review failure triage artifacts |
+| Review queue | Inspect human review queue outputs |
+
+#### Local-first debugging loop
+
+```text
+Upload/select documents
+   │
+   v
+Ask question
+   │
+   v
+Inspect answer
+   │
+   ├─ citations
+   ├─ warnings
+   ├─ debug payload
+   ├─ retrieval state
+   └─ trace/quality dashboards
+```
+
+The UI is intentionally coupled to a strict backend contract so mock, local, and persistent paths all return the same final-result shape.
+
+---
+
+</details>
+
+<details>
+<summary>Repository structure</summary>
 
 ```text
 .
@@ -764,536 +1260,14 @@ READY / FAILED lifecycle status
 
 ---
 
-## Retrieval Architecture Deep Dive
+</details>
 
-### Retrieval flow
-
-```text
-Query
-  │
-  v
-┌───────────────────────────────┐
-│ Query intelligence             │
-│ classify · rewrite · entities  │
-└───────────────┬───────────────┘
-                │
-                v
-┌───────────────────────────────┐
-│ Dense-compatible child search  │
-└───────────────┬───────────────┘
-                │
-                │       ┌───────────────────────────────┐
-                └──────►│ Sparse/BM25 child search       │
-                        └───────────────┬───────────────┘
-                                        │
-                                        v
-                        ┌───────────────────────────────┐
-                        │ Reciprocal Rank Fusion         │
-                        └───────────────┬───────────────┘
-                                        │
-                                        v
-                        ┌───────────────────────────────┐
-                        │ Chunk reranking                │
-                        └───────────────┬───────────────┘
-                                        │
-                                        v
-                        ┌───────────────────────────────┐
-                        │ Parent expansion               │
-                        │ child → parent context          │
-                        └───────────────┬───────────────┘
-                                        v
-                              Answerability + synthesis
-```
-
-### Dense retrieval
-
-Dense retrieval is represented through Qdrant-compatible abstractions:
-
-- `DenseEmbeddingService`
-- `QdrantChildChunkStore`
-- `ChildChunkDenseIndexer`
-- `ChildChunkQdrantPayload`
-
-Dense child chunks preserve parent linkage in payloads so downstream retrieval can expand from a small hit to a larger parent context.
-
-### Sparse retrieval
-
-Sparse retrieval is implemented as an in-memory BM25-style path for child chunks. This matters for legal search because exact terms often matter:
-
-- party names,
-- clause labels,
-- dates,
-- statutory phrases,
-- legal terms of art.
-
-### Reciprocal Rank Fusion
-
-Hybrid retrieval uses **Reciprocal Rank Fusion (RRF)** instead of adding raw dense and sparse scores. Dense and sparse scores are not naturally comparable, but ranks are stable and interpretable.
-
-```text
-Dense rank list      Sparse rank list
-      │                    │
-      └────────┬───────────┘
-               v
-          RRF fusion
-               │
-               v
-       HybridSearchResult[]
-```
-
-### Reranking
-
-After RRF, child hits are reranked before parent expansion. This gives the system another deterministic opportunity to prioritize issue-focused chunks before selecting parent context.
-
-### Parent expansion
-
-The answer stage does not rely on child chunk text alone. It expands child hits to parent chunks:
-
-```text
-HybridSearchResult.child_chunk_id
-  └── parent_chunk_id
-        └── ParentChunkResult.text
-              └── answer context
-```
-
-This is especially important in legal documents because qualifiers, exceptions, and definitions are often near—but not inside—the exact matching sentence.
-
-### Qdrant → Postgres resolution flow
-
-```text
-Qdrant raw hit
-  │
-  ├─ payload.chunk_id / child_chunk_id
-  └─ raw point id
-  │
-  v
-QdrantResultResolver
-  │
-  v
-PostgresChunkRepository
-  │
-  v
-Persisted child chunk row
-  │
-  v
-ChildSearchResult(parent_chunk_id=...)
-  │
-  v
-ParentChunkRepository.get_by_ids(...)
-```
-
-This keeps dense vector retrieval tied to durable chunk records rather than treating vector payloads as the system of record.
-
----
-
-## Answer Generation & Safety
-
-Legal answer generation is designed around **trustworthiness** rather than fluency alone.
-
-### Safety flow
-
-```text
-Retrieved parent context
-   │
-   v
-Evidence unit normalization
-   │
-   v
-Answerability assessment
-   │
-   ├─ no context ──────────────► insufficient-context response
-   ├─ weak context ────────────► safe/qualified response path
-   └─ sufficient context ──────► grounded synthesis
-                                  │
-                                  v
-                              citation validation
-                                  │
-                                  v
-                              final contract
-```
-
-### Answerability gating
-
-The answerability layer evaluates:
-
-- whether relevant context exists,
-- whether evidence is sufficient,
-- whether support is partial or weak,
-- whether the query needs clarification,
-- whether a safe failure is more appropriate than an answer.
-
-### Grounded synthesis
-
-The default synthesizer is deterministic and extractive:
-
-- it ranks relevant context,
-- extracts supporting excerpts,
-- builds structured citations,
-- adds caveats when evidence appears partial,
-- preserves warnings separately from the answer text.
-
-Optional local LLM drafting can be enabled for selected stages, but deterministic fallback remains part of the design.
-
-### Citation enforcement
-
-The final answer model separates citations from prose. A grounded answer is expected to carry citations. The graph validation path downgrades unsupported groundedness when citations are missing.
-
-### Final answer contract
-
-Every real backend result must satisfy:
-
-```json
-{
-  "answer_text": "string",
-  "grounded": true,
-  "sufficient_context": true,
-  "citations": [],
-  "warnings": []
-}
-```
-
-The UI adapter validates this shape before rendering.
-
----
-
-## Evaluation & Observability
-
-This repository treats quality infrastructure as part of the architecture.
-
-### Evaluation stack
-
-```text
-JSONL eval datasets
-   │
-   v
-Offline eval runner
-   │
-   ├─ system execution
-   ├─ deterministic graders
-   ├─ optional LLM judge parsers
-   └─ JSON run artifact
-   │
-   v
-Reports / dashboards / CI gates
-```
-
-### Implemented evaluation components
-
-| Component | Purpose | Location |
-|---|---|---|
-| Eval datasets | Regression and tiered legal test cases | `evals/datasets/` |
-| Fixture docs | Local offline document corpus | `evals/fixtures/offline_documents/` |
-| Eval schema | JSON schema for legal eval cases | `evals/schema/legal_eval_case.json` |
-| Eval runner | Executes cases and writes machine-readable results | `evals/runners/run_offline_eval.py` |
-| CI wrapper | Selects families, runs eval modes, enforces gates | `evals/ci/offline_eval_ci.py` |
-| Deterministic graders | Contract, citation, retrieval, answerability, routing checks | `evals/graders/` |
-| LLM judge parsers | Answer correctness, groundedness, safe failure parsing | `evals/graders/llm_judges/` |
-| Reports | Markdown reports, dashboard data, triage, review queues | `evals/reports/` |
-
-### CI workflows
-
-| Workflow | Trigger | Behavior |
-|---|---|---|
-| Offline Eval PR Gates | Pull requests | Runs smoke evals and touched-family evals, enforces pass-rate gates |
-| Offline Eval Nightly Regression | Scheduled/manual | Runs full offline regression and builds markdown report |
-
-### Observability components
-
-- Structured trace helpers in `src/agentic_rag/orchestration/tracing.py`.
-- Metrics emission and aggregation in `src/agentic_rag/orchestration/metrics.py`.
-- Trace schema docs in `observability/schema/trace_schema.md`.
-- Streamlit trace dashboard in `ui/trace_dashboard.py`.
-- Quality dashboard in `ui/quality_dashboard.py`.
-- Failure triage dashboard in `ui/triage_dashboard.py`.
-- Human review queue dashboard in `ui/review_queue_dashboard.py`.
-- Online shadow grading support in `src/agentic_rag/orchestration/online_shadow_grading.py`.
-- Production traffic sampling helpers in `src/agentic_rag/orchestration/traffic_sampling.py`.
-
----
-
-## Streamlit Inspection UI
-
-The Streamlit UI is a local-first inspection environment for the RAG pipeline.
-
-### UI capabilities
-
-| UI area | Purpose |
-|---|---|
-| Sidebar runtime controls | Choose mock/real mode, upload/select documents, configure local LLM options |
-| Query panel | Submit legal questions and optional conversation context |
-| Answer panel | Render final answer text and warnings |
-| Citation panel | Inspect structured citations |
-| Debug payload panel | Inspect raw debug/state payloads |
-| Quality dashboard | Explore offline eval quality artifacts |
-| Trace dashboard | Inspect trace data and spans |
-| Triage dashboard | Review failure triage artifacts |
-| Review queue | Inspect human review queue outputs |
-
-### Local-first debugging loop
-
-```text
-Upload/select documents
-   │
-   v
-Ask question
-   │
-   v
-Inspect answer
-   │
-   ├─ citations
-   ├─ warnings
-   ├─ debug payload
-   ├─ retrieval state
-   └─ trace/quality dashboards
-```
-
-The UI is intentionally coupled to a strict backend contract so mock, local, and persistent paths all return the same final-result shape.
-
----
-
-## Example Query Flow
-
-### Example legal question walkthrough
-
-```text
-User query:
-"Who is the employer under this agreement?"
-
-1. Query understanding
-   └─ detects a party-role/entity lookup style question
-
-2. Retrieval
-   ├─ searches child chunks for party/role language
-   ├─ fuses dense/sparse signals where available
-   └─ reranks relevant child chunks
-
-3. Parent expansion
-   └─ fetches larger parent chunks containing agreement introduction/context
-
-4. Answerability
-   └─ checks whether retrieved context contains enough party-role evidence
-
-5. Grounded synthesis
-   ├─ extracts supporting party-role evidence
-   ├─ writes a direct answer
-   └─ attaches citations to parent chunks/source headings
-
-6. Final contract
-   └─ answer_text, grounded, sufficient_context, citations, warnings
-```
-
-### Persistent ingestion example
-
-```text
-Upload employment-agreement.pdf
-   │
-   v
-Validate filename and payload
-   │
-   v
-Register Document + DocumentVersion
-   │
-   v
-Save bytes to DOCUMENT_STORAGE_PATH
-   │
-   v
-Create ingestion job
-   │
-   v
-PDF → Markdown
-   │
-   v
-Parent/child chunking
-   │
-   v
-Persist chunks to Postgres
-   │
-   v
-Optional child vector indexing
-   │
-   v
-Validation + lifecycle status
-   │
-   v
-Future persistent retrieval path:
-Qdrant hit → Postgres child row → parent chunk → answer generation
-```
-
-> Persistent ingestion and storage foundations are implemented, but the complete persistent vector retrieval path should be treated as experimental until the known wiring/dependency issues are addressed.
-
----
-
-## Tech Stack
-
-| Category | Technology / pattern | Status | Where used |
-|---|---|---:|---|
-| Language | Python | ✅ Implemented | Entire repository |
-| UI | Streamlit | ✅ Implemented | `app.py`, `ui/` |
-| PDF parsing | PyMuPDF / `fitz` | ✅ Implemented | `src/agentic_rag/ingestion/converters.py` |
-| PDF → Markdown | `pymupdf4llm` | ✅ Implemented | `src/agentic_rag/ingestion/converters.py` |
-| Local LLM | `llama-cpp-python` | ⚙️ Optional | `src/agentic_rag/llm/local_provider.py` |
-| Graph runtime | LangGraph | ⚙️ Optional fallback-supported import | `retrieval_graph.py`, `legal_rag_graph.py` |
-| Data modeling | Pydantic-compatible models | ⚙️ Optional fallback shim exists | `_compat_pydantic.py`, graph/tool models |
-| ORM | SQLAlchemy | ✅ Implemented | `src/agentic_rag/storage/models.py`, `postgres.py` |
-| Database | Postgres | ⚠️ Persistent foundation | `docker-compose.yml`, storage config |
-| Vector store | Qdrant | ⚠️ Persistent foundation / experimental runtime path | `docker-compose.yml`, Qdrant-compatible indexing/resolution modules |
-| Sparse retrieval | BM25-style in-memory sparse retrieval | ✅ Implemented | `src/agentic_rag/indexing/sparse_child_chunks.py` |
-| Hybrid retrieval | Reciprocal Rank Fusion | ✅ Implemented | `src/agentic_rag/retrieval/parent_child.py` |
-| Testing | pytest | ✅ Implemented | `tests/` |
-| Containers | Docker | ✅ Implemented | `Dockerfile` |
-| Local stack | Docker Compose | ✅ Implemented | `docker-compose.yml` |
-| CI quality | GitHub Actions offline eval workflows | ✅ Implemented | `.github/workflows/` |
-
----
-
-## Running Locally
-
-### 1. Clone and enter the repository
-
-```bash
-git clone <repo-url>
-cd Agentic_Rag
-```
-
-### 2. Create a virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-
-```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Start the Streamlit UI
-
-```bash
-streamlit run app.py
-```
-
-The UI supports mock mode and real local in-memory mode. For local RAG, upload/select `.md`, `.txt`, or `.pdf` files and disable mock mode in the UI.
-
----
-
-### Docker Compose local stack
-
-The repository includes a local stack with Streamlit, Postgres, and Qdrant:
-
-```bash
-docker compose up --build
-```
-
-Services:
-
-| Service | Purpose | Local port |
-|---|---|---:|
-| `app` | Streamlit UI | `8501` |
-| `postgres` | Persistent metadata/chunks/jobs | `5432` |
-| `qdrant` | Vector storage service | `6333`, `6334` |
-
-Configured app environment variables in Compose:
-
-```text
-DATABASE_URL
-QDRANT_URL
-QDRANT_COLLECTION_NAME
-DOCUMENT_STORAGE_PATH
-```
-
-> Persistent mode is useful for exercising storage foundations. Treat complete persistent vector retrieval as experimental until the known limitations are resolved.
-
----
-
-### Local LLM configuration
-
-Local LLM support is optional and uses environment-backed config. Relevant variables include:
-
-```bash
-export AGENTIC_RAG_LOCAL_LLM_ENABLED=true
-export AGENTIC_RAG_LOCAL_LLM_PROVIDER=llama_cpp
-export AGENTIC_RAG_LOCAL_LLM_MODEL_PATH=/path/to/model.gguf
-export AGENTIC_RAG_LOCAL_LLM_N_CTX=4096
-export AGENTIC_RAG_LOCAL_LLM_TEMPERATURE=0.0
-export AGENTIC_RAG_LOCAL_LLM_TIMEOUT_SECONDS=8.0
-export AGENTIC_RAG_LOCAL_LLM_MAX_TOKENS=512
-```
-
-The UI also exposes stage toggles for rewrite, decomposition, and synthesis when local LLM mode is enabled.
-
----
-
-### Run tests
-
-```bash
-pytest -q
-```
-
-> At the time this README was generated from repository inspection, the test suite was not fully green in the current environment: `781 passed, 17 failed, 1 skipped`. See [Known Limitations](#known-limitations).
-
----
-
-### Run offline eval helpers
-
-Smoke eval:
-
-```bash
-python evals/ci/offline_eval_ci.py run \
-  --mode smoke \
-  --output artifacts/offline_eval/smoke_run.json
-```
-
-Check smoke gate:
-
-```bash
-python evals/ci/offline_eval_ci.py check-gate \
-  --run-json artifacts/offline_eval/smoke_run.json \
-  --min-pass-rate 1.0 \
-  --max-runner-failures 0
-```
-
-Family eval:
-
-```bash
-python evals/ci/offline_eval_ci.py run \
-  --mode family \
-  --family party_role \
-  --output artifacts/offline_eval/family_run.json
-```
-
-Full eval:
-
-```bash
-python evals/ci/offline_eval_ci.py run \
-  --mode full \
-  --output artifacts/offline_eval/full_run.json
-```
-
-Build a report from an eval run:
-
-```bash
-python evals/reports/build_report.py \
-  --candidate artifacts/offline_eval/full_run.json \
-  --output artifacts/offline_eval/full_report.md
-```
-
----
-
-## Known Limitations
+<details>
+<summary>Known limitations</summary>
 
 This project is intentionally transparent about its current maturity.
 
-### Fully implemented and reliable paths
+#### Fully implemented and reliable paths
 
 - Mock Streamlit backend.
 - Local in-memory RAG over uploaded/selected `.md`, `.txt`, and `.pdf` files.
@@ -1304,7 +1278,7 @@ This project is intentionally transparent about its current maturity.
 - Strict final result contract validation.
 - Offline eval runner, deterministic graders, reports, and CI workflow definitions.
 
-### Partially wired / experimental areas
+#### Partially wired / experimental areas
 
 - **Persistent Postgres/Qdrant runtime path:** storage models, document registry, ingestion jobs, chunk persistence, vector indexing services, and Qdrant resolution classes exist, but complete app-level persistent vector retrieval wiring needs cleanup.
 - **Persistent UI ingestion vector indexing:** the persistent ingestion UI helper constructs an `IngestionOrchestrator` without passing a vector indexing service, so persistent uploads may persist chunks without indexing vectors unless wired elsewhere.
@@ -1313,24 +1287,23 @@ This project is intentionally transparent about its current maturity.
 - **Embedding backend dependency:** dense indexing uses `sentence-transformers` through the default `DenseEmbeddingService` backend, so it is listed in `requirements.txt` for the shipped runtime path. Callers may still pass a custom backend implementing the project protocol for tests or specialized deployments.
 - **Persistent backend import mismatch:** app-level persistent wiring references `qdrant_config_from_env`; this symbol should be verified/fixed before treating persistent mode as production-ready.
 
-### Current test baseline
+#### Current test baseline
 
-A full `pytest -q` run in the inspected environment produced:
+A full `pytest` run in the inspected environment produced:
 
 ```text
-781 passed, 17 failed, 1 skipped
+787 passed, 15 failed, 1 skipped
 ```
 
 Observed failures were concentrated around:
 
-- latest eval JSON selection,
 - document deletion cascade behavior,
 - document version/job ordering,
 - ingestion retry/reindex behavior,
 - ingestion validation,
 - persistent ingestion duplicate/status handling.
 
-### Non-production caveats
+#### Non-production caveats
 
 - No dedicated HTTP API layer is implemented.
 - No authentication/authorization layer is implemented.
@@ -1341,38 +1314,41 @@ Observed failures were concentrated around:
 
 ---
 
-## Future Improvements
+</details>
+
+<details>
+<summary>Future improvements</summary>
 
 A realistic roadmap based on the current architecture:
 
-### Persistence and retrieval
+#### Persistence and retrieval
 
 - Fully wire persistent ingestion → vector indexing → Qdrant retrieval → Postgres resolution → parent expansion.
 - Centralize Qdrant configuration and collection naming.
 - Add missing optional dependencies or dependency extras for persistent/vector modes.
 - Add an end-to-end persistent retrieval integration test.
 
-### Packaging and developer experience
+#### Packaging and developer experience
 
 - Add `pyproject.toml` with package metadata and optional dependency groups.
 - Split dependencies into runtime, development, persistent, and local-LLM extras.
 - Define supported Python versions explicitly.
 - Reduce ad hoc path bootstrapping by installing the package in editable mode.
 
-### Retrieval quality
+#### Retrieval quality
 
 - Add stronger reranking options behind the existing reranker abstraction.
 - Expand legal sparse tokenization and retrieval diagnostics.
 - Add retrieval evaluation slices by legal question family.
 - Add caching for repeated local document chunking/indexing.
 
-### Application architecture
+#### Application architecture
 
 - Extract persistent backend construction out of `app.py` into a dedicated runtime module.
 - Add a dedicated API layer if the project evolves beyond Streamlit inspection.
 - Add stronger upload validation, file-size limits, and deployment security guidance.
 
-### Observability and evaluation
+#### Observability and evaluation
 
 - Expand trace dashboards with node-level latency and artifact lineage.
 - Add more regression families and failure taxonomies.
@@ -1381,20 +1357,4 @@ A realistic roadmap based on the current architecture:
 
 ---
 
-## Why This Project Matters
-
-RAG systems are easy to demo and hard to trust.
-
-Legal RAG is even harder: a useful system must preserve context, cite evidence, know when evidence is weak, and fail safely when the document set does not support an answer. It must also be debuggable when retrieval misses something or synthesis overstates the record.
-
-`Agentic_Rag` is interesting because it treats those concerns as architecture, not decoration:
-
-- **Deterministic orchestration** makes behavior inspectable.
-- **Parent-child retrieval** balances precision and context.
-- **Answerability gating** prevents unsupported answers.
-- **Grounded synthesis** keeps claims tied to evidence.
-- **Strict contracts** make UI, eval, and orchestration boundaries safer.
-- **Offline evaluation** turns quality into a repeatable engineering workflow.
-- **Persistence foundations** show how local demos can evolve toward durable document lifecycle management.
-
-The project is not trying to hide complexity behind a single chatbot prompt. It exposes the moving parts that make trustworthy legal AI systems possible.
+</details>
