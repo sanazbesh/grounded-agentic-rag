@@ -6,6 +6,8 @@ llama-cpp-python>=0.3.0
 SQLAlchemy>=2.0
 psycopg[binary]>=3.1
 qdrant-client
+# Required by DenseEmbeddingService's default SentenceTransformer backend.
+# Callers may inject a custom EmbeddingBackend, but the shipped runtime path uses this package.
 sentence-transformers
 
 # Development / testing
