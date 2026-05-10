@@ -5,6 +5,8 @@ pymupdf4llm>=0.0.10
 llama-cpp-python>=0.3.0
 SQLAlchemy>=2.0
 psycopg[binary]>=3.1
+
+# Dense indexing / vector storage backends
 sentence-transformers
 qdrant-client
 
