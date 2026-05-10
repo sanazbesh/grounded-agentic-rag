@@ -16,7 +16,7 @@
 
 This project is intentionally not a generic chatbot wrapper. It is a transparent RAG system where every answer is routed through retrieval, evidence sufficiency checks, grounded synthesis, citations, warnings, tracing, and offline evaluation.
 
-> **Accuracy note:** this README distinguishes fully implemented local/in-memory behavior from partially wired persistent infrastructure. Postgres/Qdrant storage foundations exist, but the persistent vector retrieval path should be treated as experimental until the dependency/configuration gaps listed in [Known Limitations](#known-limitations) are resolved.
+> **Accuracy note:** this README distinguishes fully implemented local/in-memory behavior from partially wired persistent infrastructure. Postgres/Qdrant storage foundations exist, but the persistent vector retrieval path should be treated as experimental until the wiring/configuration gaps listed in [Known Limitations](#known-limitations) are resolved.
 
 
 ---
@@ -191,7 +191,7 @@ The repository supports three runtime modes with different maturity levels.
 |---|---:|---|---|---|---|
 | **Mock backend** | ✅ Implemented | Fast deterministic UI demos without real retrieval | Streamlit only | Does not exercise real RAG logic | UI development, screenshots, demos |
 | **Local in-memory backend** | ✅ Implemented | Real local RAG over selected uploaded/local docs | Streamlit, PyMuPDF, pymupdf4llm, local Python modules | Data is rebuilt in memory; not durable | Local experimentation, interview demos, architecture inspection |
-| **Persistent Postgres/Qdrant backend** | ⚠️ Partially wired / experimental | Durable document metadata/chunks and intended vector-backed retrieval | Postgres, Qdrant, SQLAlchemy, psycopg, plus additional optional client/model dependencies | Persistence foundations exist, but some runtime wiring/dependencies need cleanup | Future production-like local stack, persistent ingestion experiments |
+| **Persistent Postgres/Qdrant backend** | ⚠️ Partially wired / experimental | Durable document metadata/chunks and intended vector-backed retrieval | Postgres, Qdrant, SQLAlchemy, psycopg, qdrant-client, sentence-transformers | Persistence foundations exist, but some runtime wiring/configuration needs cleanup | Future production-like local stack, persistent ingestion experiments |
 
 ### 1. Mock backend
 
@@ -1347,7 +1347,7 @@ A realistic roadmap based on the current architecture:
 
 - Fully wire persistent ingestion → vector indexing → Qdrant retrieval → Postgres resolution → parent expansion.
 - Centralize Qdrant configuration and collection naming.
-- Add missing optional dependencies or dependency extras for persistent/vector modes.
+- Add optional dependency extras for persistent/vector modes once packaging metadata exists.
 - Add an end-to-end persistent retrieval integration test.
 
 ### Packaging and developer experience
