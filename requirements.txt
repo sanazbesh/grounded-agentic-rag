@@ -6,6 +6,7 @@ llama-cpp-python>=0.3.0
 SQLAlchemy>=2.0
 psycopg[binary]>=3.1
 sentence-transformers
+qdrant-client
 
 # Development / testing
 pytest>=8.0

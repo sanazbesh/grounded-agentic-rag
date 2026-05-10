@@ -1309,8 +1309,6 @@ This project is intentionally transparent about its current maturity.
 - **Persistent Postgres/Qdrant runtime path:** storage models, document registry, ingestion jobs, chunk persistence, vector indexing services, and Qdrant resolution classes exist, but complete app-level persistent vector retrieval wiring needs cleanup.
 - **Persistent UI ingestion vector indexing:** the persistent ingestion UI helper constructs an `IngestionOrchestrator` without passing a vector indexing service, so persistent uploads may persist chunks without indexing vectors unless wired elsewhere.
 - **Qdrant config centralization:** Compose sets `QDRANT_COLLECTION_NAME`, while code also has a default collection constant. This should be centralized.
-- **Qdrant Python client dependency:** the app imports `qdrant_client`, but `requirements.txt` does not currently list `qdrant-client`.
-- **Embedding backend dependency:** dense indexing expects an embedding backend and the default path references sentence-transformer-style behavior, but `requirements.txt` does not currently include `sentence-transformers`.
 - **Persistent backend import mismatch:** app-level persistent wiring references `qdrant_config_from_env`; this symbol should be verified/fixed before treating persistent mode as production-ready.
 
 ### Current test baseline
